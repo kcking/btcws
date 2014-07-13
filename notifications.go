@@ -30,6 +30,9 @@ const (
 	// txacceptedverbose notifications.
 	TxAcceptedVerboseNtfnMethod = "txacceptedverbose"
 
+    // TxDoubleSpentNtfnMethod is the method of the btcd txdoublespent notification.
+    TxDoubleSpentNtfnMethod = "txdoublespent"
+
 	// BlockConnectedNtfnMethod is the method of the btcd
 	// blockconnected notification.
 	BlockConnectedNtfnMethod = "blockconnected"
@@ -92,6 +95,8 @@ func init() {
 		`TODO(flam) fillmein`)
 	btcjson.RegisterCustomCmd(TxAcceptedVerboseNtfnMethod,
 		parseTxAcceptedVerboseNtfn, nil, `TODO(flam) fillmein`)
+	btcjson.RegisterCustomCmd(TxDoubleSpentNtfnMethod,
+		parseTxDoubleSpentNtfn, nil, `TODO(flam) fillmein`)
 }
 
 // BlockDetails describes details of a tx in a block.
@@ -1137,14 +1142,31 @@ type TxAcceptedVerboseNtfn struct {
 	RawTx *btcjson.TxRawResult `json:"rawtx"`
 }
 
+type TxDoubleSpentNtfn struct {
+    MempoolTxHash *string `json:"mempooltxhash"`
+    IncomingTxHash *string `json:"incomingtxhash"`
+    IsInBlock bool `json:"isinblock"`
+}
+
 // Enforce that TxAcceptedNtfn satisifies the btcjson.Cmd interface.
 var _ btcjson.Cmd = &TxAcceptedVerboseNtfn{}
+
+// Enforce that TxDoubleSpentNtfn satisifies the btcjson.Cmd interface.
+var _ btcjson.Cmd = &TxDoubleSpentNtfn{}
 
 // NewTxAcceptedVerboseNtfn creates a new TxAcceptedVerboseNtfn.
 func NewTxAcceptedVerboseNtfn(rawTx *btcjson.TxRawResult) *TxAcceptedVerboseNtfn {
 	return &TxAcceptedVerboseNtfn{
 		RawTx: rawTx,
 	}
+}
+
+func NewTxDoubleSpentNtfn(mempoolTxHash *string, incomingTxHash *string, isInBlock bool) *TxDoubleSpentNtfn {
+    return &TxDoubleSpentNtfn{
+        MempoolTxHash: mempoolTxHash,
+        IncomingTxHash: incomingTxHash,
+        IsInBlock: isInBlock,
+    }
 }
 
 // parseTxAcceptedVerboseNtfn parses a RawCmd into a concrete type satisifying
@@ -1167,16 +1189,51 @@ func parseTxAcceptedVerboseNtfn(r *btcjson.RawCmd) (btcjson.Cmd, error) {
 	return NewTxAcceptedVerboseNtfn(rawTx), nil
 }
 
+func parseTxDoubleSpentNtfn(r *btcjson.RawCmd) (btcjson.Cmd, error) {
+	if r.Id != nil {
+		return nil, ErrNotANtfn
+	}
+
+	if len(r.Params) != 3 {
+		return nil, btcjson.ErrWrongNumberOfParams
+	}
+
+    var mempoolTxHash string
+    if err := json.Unmarshal(r.Params[0], &mempoolTxHash); err != nil {
+        return nil, err
+    }
+
+    var incomingTxHash string
+    if err := json.Unmarshal(r.Params[1], &incomingTxHash); err != nil {
+        return nil, err
+    }
+
+    var isInBlock bool
+    if err := json.Unmarshal(r.Params[2], &isInBlock); err != nil {
+        return nil, err
+    }
+
+    return NewTxDoubleSpentNtfn(&mempoolTxHash, &incomingTxHash, isInBlock), nil
+}
+
 // Id satisifies the btcjson.Cmd interface by returning nil for a
 // notification ID.
 func (n *TxAcceptedVerboseNtfn) Id() interface{} {
 	return nil
 }
 
+func (n *TxDoubleSpentNtfn) Id() interface{} {
+    return nil
+}
+
 // Method satisifies the btcjson.Cmd interface by returning the method
 // of the notification.
 func (n *TxAcceptedVerboseNtfn) Method() string {
 	return TxAcceptedVerboseNtfnMethod
+}
+
+func (n *TxDoubleSpentNtfn) Method() string {
+	return TxDoubleSpentNtfnMethod
 }
 
 // MarshalJSON returns the JSON encoding of n.  Part of the btcjson.Cmd
@@ -1192,6 +1249,21 @@ func (n *TxAcceptedVerboseNtfn) MarshalJSON() ([]byte, error) {
 		return nil, err
 	}
 	return json.Marshal(raw)
+}
+
+func (n *TxDoubleSpentNtfn) MarshalJSON() ([]byte, error) {
+    params := []interface{}{
+        n.MempoolTxHash,
+        n.IncomingTxHash,
+        n.IsInBlock,
+    }
+
+    // No ID for notifications
+    raw, err := btcjson.NewRawCmd(nil, n.Method(), params)
+    if err != nil {
+        return nil, err
+    }
+    return json.Marshal(raw)
 }
 
 // UnmarshalJSON unmarshals the JSON encoding of n into n.  Part of
@@ -1213,4 +1285,23 @@ func (n *TxAcceptedVerboseNtfn) UnmarshalJSON(b []byte) error {
 	}
 	*n = *concreteNtfn
 	return nil
+}
+
+func (n *TxDoubleSpentNtfn) UnmarshalJSON(b []byte) error {
+    var r btcjson.RawCmd
+    if err := json.Unmarshal(b, &r); err != nil {
+        return err
+    }
+
+    newNtfn, err := parseTxDoubleSpentNtfn(&r)
+    if err != nil {
+        return err
+    }
+
+    concreteNtfn, ok := newNtfn.(*TxDoubleSpentNtfn)
+    if !ok {
+        return btcjson.ErrInternal
+    }
+    *n = *concreteNtfn
+    return nil
 }
